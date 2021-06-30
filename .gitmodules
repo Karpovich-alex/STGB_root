@@ -1,0 +1,4 @@
+[submodule "STGB_bot"]
+	path = STGB_bot
+	url = https://github.com/Karpovich-alex/STGB_bot.git
+	branch = master
