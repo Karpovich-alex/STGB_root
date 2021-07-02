@@ -2,3 +2,7 @@
 	path = STGB_bot
 	url = https://github.com/Karpovich-alex/STGB_bot.git
 	branch = master
+[submodule "STGB_worker"]
+	path = STGB_worker
+	url = https://github.com/Karpovich-alex/STGB_worker.git
+	branch = master
