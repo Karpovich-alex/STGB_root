@@ -6,3 +6,6 @@
 	path = STGB_worker
 	url = https://github.com/Karpovich-alex/STGB_worker.git
 	branch = master
+[submodule "STGB_backend"]
+	path = STGB_backend
+	url = https://github.com/Karpovich-alex/STGB_backend.git
