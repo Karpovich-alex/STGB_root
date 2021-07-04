@@ -1,10 +1,11 @@
-from sqlalchemy.orm import declarative_base, relationship
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, desc
-from .base import current_session as s
-from typing import Optional, List, Dict
-import telegram
 import logging
-import traceback
+from typing import Optional, List, Dict
+
+import telegram
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, desc
+from sqlalchemy.orm import declarative_base, relationship
+
+from .base import current_session as s
 
 Base = declarative_base()
 
@@ -63,7 +64,7 @@ class Message(Base):
     def add_message(cls, message: telegram.Message) -> Optional['Message']:
         try:
             m = cls(id=message.message_id, text=message.text, time=message.date, bot_id=message.bot.id,
-                        user_id=message.from_user.id)
+                    user_id=message.chat_id)
             s.add(m)
             s.commit()
             return m
@@ -79,7 +80,7 @@ class Message(Base):
 
     @classmethod
     def get_messages(cls, bot_id, user_id) -> List['Message']:
-        messages = s.query(Message).filter_by(user_id=user_id, bot_id=bot_id).order_by(desc('time')).all()
+        messages = s.query(Message).filter_by(user_id=user_id, bot_id=bot_id).order_by('time').all()
         return messages
 
 
