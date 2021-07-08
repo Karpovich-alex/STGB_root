@@ -1,6 +1,7 @@
 .env
 venv
 .idea
+pgdata
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

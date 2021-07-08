@@ -6,6 +6,7 @@ import telegram
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, Table
 from sqlalchemy.orm import declarative_base, relationship
 
+import utils.validator as v
 from .base import current_session as s
 
 Base = declarative_base()
@@ -14,6 +15,10 @@ Base = declarative_base()
 class Messengers(enum.Enum):
     support = 0
     telegram = 1
+
+    @classmethod
+    def check_value(cls, value):
+        return value in cls.__members__
 
 
 class MessengerConnector:
@@ -26,6 +31,15 @@ class MessengerConnector:
 UsersInChat = Table('usersinchat', Base.metadata,
                     Column('user_id', Integer, ForeignKey('users.id')),
                     Column('chat_id', Integer, ForeignKey('chat.id')))
+
+
+def parse_user(user: v.User, filter_args: Dict) -> Dict:
+    if user.source == v.Source.messenger:
+        filter_args['messenger_id'] = user.id
+        filter_args['messenger'] = filter_args.get('messenger', Messengers[user.messenger])
+    else:
+        filter_args['id'] = user.id
+    return filter_args
 
 
 class User(Base, MessengerConnector):
@@ -45,25 +59,42 @@ class User(Base, MessengerConnector):
     chats = relationship('Chat', secondary='usersinchat', back_populates='users')
     messages = relationship('Message', back_populates='user')
 
+    def __init__(self, *args, **kwargs):
+        super(Base, self).__init__(*args, **kwargs)
+
     def __repr__(self):
         return "<User id: {id} username: {username}>".format(id=self.id, username=self.username)
 
+    # @classmethod
+    # def check_user(cls, messenger_user: v.User = None, user: v.User = None, **filter_args) -> bool:
+    #     if messenger_user:
+    #         filter_args['messenger'] = filter_args.get('messenger', messenger_user.bot.messenger)
+    #         filter_args = {'messenger_id': messenger_user.id,
+    #                        'bot_id': messenger_user.bot.id}  # for user from messenger
+    #     elif user:
+    #         filter_args['messenger'] = filter_args.get('messenger', user.bot.messenger)
+    #         filter_args = {'messenger_id': user.id, 'bot_id': user.bot.id}
+    #     u = s.query(User).filter_by(**filter_args).first()
+    #     return bool(u)
     @classmethod
-    def check_user(cls, user: telegram.User = None, **filter_args) -> Optional['User']:
-        filter_args['messenger'] = filter_args.get('messenger', Messengers.telegram)
-        if user:
-            filter_args = {'messenger_id': user.id, 'username': user.username}  # for user from tg
+    def check_user(cls, user: v.User, **filter_args) -> Union['User', bool]:
+        filter_args = parse_user(user, filter_args)
         u = s.query(User).filter_by(**filter_args).first()
         return u or False
 
     @classmethod
-    def create_user(cls, user: telegram.User, bot_m_id, messenger=Messengers.telegram) -> 'User':
+    def create_user(cls, user: v.User) -> 'User':
         if cls.check_user(user=user):
             raise AttributeError('This user has already exist')
-        bot_id = Bot.get_id(bot_m_id, messenger)
-        u = cls(messenger_id=user.id, username=user.username, first_name=user.first_name,
-                language_code=user.language_code, full_name=user.full_name, messenger=messenger, bot_id=bot_id)
 
+        bot_id = Bot.get_id(messenger=user.messenger, messenger_id=user.bot_id)
+        u = cls(username=user.username, first_name=user.first_name,
+                language_code=user.language_code, full_name=user.full_name, messenger=user.messenger,
+                bot_id=user.bot_id)
+        if user.source == v.Source.messenger:
+            u.messenger_id = user.id
+        else:
+            u.id = user.id
         c = Chat(bot_id=bot_id, messenger_id=u.messenger_id)
         u.chats.append(c)
         s.add(u)
@@ -71,21 +102,43 @@ class User(Base, MessengerConnector):
         return u
 
     @classmethod
-    def get_user(cls, user: telegram.User = None, messenger_id=None, bot_m_id=None, **filter_args) -> 'User':
-        if messenger_id:
-            filter_args['messenger_id'] = messenger_id
-        if filter_args:
-            u = cls.check_user(**filter_args)
-        else:
-            u = cls.check_user(user=user)
+    def get_user(cls, user: v.User) -> 'User':
+        u = cls.check_user(user)
         if u:
             return u
-        elif user:
-            return cls.create_user(user, bot_m_id)
         else:
-            raise AttributeError
+            return cls.create_user(user)
+
+    # @classmethod
+    # def get_user(cls, user: v.User = None,
+    #              bot: v.User = None,
+    #              tg_user: telegram.User = None,
+    #              messenger_id=None,
+    #              bot_m_id=None,
+    #              **filter_args) -> 'User':
+    #     if user and bot:
+    #         filter_args['messenger_id'] = user.id
+    #         if Messengers.check_value(bot.messenger):
+    #             filter_args['messenger'] = Messengers[bot.messenger]
+    #         else:
+    #             raise ValueError('This messenger is not supported')
+    #         return cls.check_user(**filter_args) or cls.create_user(user, bot_m_id=bot.id)
+    #
+    #     if messenger_id:
+    #         filter_args['messenger_id'] = messenger_id
+    #     if filter_args:
+    #         u = cls.check_user(**filter_args)
+    #     else:
+    #         u = cls.check_user(user=user)
+    #     if u:
+    #         return u
+    #     elif tg_user:
+    #         return cls.create_user(tg_user, bot_m_id)
+    #     else:
+    #         raise AttributeError
 
     def get_chat(self, bot_m_id) -> 'Chat':
+        # TODO: Change
         return self.chats[0]
 
     @classmethod
@@ -121,27 +174,27 @@ class Message(Base):
     user = relationship('User', back_populates='messages')
 
     @classmethod
-    def add_message(cls, message: telegram.Message, user: Optional['User'] = None, chat: Optional['Chat'] = None,
-                    user_id=None, chat_id=None) -> Optional['Message']:
-        try:
-            params = {}
-            if user:
-                params['user'] = user
-            if chat:
-                params['chat'] = chat
-            if chat_id:
-                params['chat_id'] = chat_id
-            if user_id:
-                params['user_id'] = user_id
+    def add_message(cls, message: v.Message,
+                    user: Optional['User'] = None,
+                    chat: Optional['Chat'] = None,
+                    user_id=None,
+                    chat_id=None) -> Optional['Message']:
 
-            m = cls(messenger_id=message.message_id, text=message.text, time=message.date, **params)
+        params = {}
+        if user:
+            params['user'] = user
+        if chat:
+            params['chat'] = chat
+        if chat_id:
+            params['chat_id'] = chat_id
+        if user_id:
+            params['user_id'] = user_id
 
-            s.add(m)
-            s.commit()
-            return m
-        except Exception as e:
-            logging.exception(e)
-            return None
+        m = cls(messenger_id=message.id, text=message.text, time=message.date, **params)
+
+        s.add(m)
+        s.commit()
+        return m
 
     def __repr__(self):
         return "<Message from user: {user_id} to chat: {chat_id}>".format(user_id=self.user_id,
@@ -172,7 +225,9 @@ class Bot(Base):
         return False
 
     @classmethod
-    def get_id(cls, messenger_id, messenger: Messengers) -> int:
+    def get_id(cls, messenger_id, messenger: Union[str, Messengers]) -> int:
+        if type(messenger) == str and Messengers.check_value(messenger):
+            messenger = Messengers[messenger]
         bot = s.query(cls).filter_by(messenger=messenger, messenger_id=messenger_id).first()
         return bot.id
 
@@ -216,6 +271,9 @@ class Chat(Base, MessengerConnector):
     bot = relationship('Bot', back_populates='chats')
     messages = relationship('Message', back_populates='chat', order_by=lambda: Message.time)
     users = relationship('User', secondary='usersinchat', back_populates='chats')
+
+    def __init__(self, *args, **kwargs):
+        super(Base, self).__init__(*args, **kwargs)
 
     @classmethod
     def create_chat(cls, user, bot_id, messenger_id):
