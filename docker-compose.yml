@@ -1,0 +1,59 @@
+version: "3.9"
+services:
+  rabbitmq:
+    container_name: rabbit_mq
+    image: library/rabbitmq:alpine
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 30s
+      retries: 3
+    ports:
+      - 15691:15691
+      - 5672:5672
+    networks:
+      - mynetwork
+  postgres:
+    image: library/postgres:alpine
+    container_name: postgres_db
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    env_file:
+      - ./.env
+    ports:
+      - 5432:5432
+    networks:
+      - mynetwork
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  api:
+    build:
+      context: ./
+      dockerfile: STGB_backend/Dockerfile
+    container_name: stgb_backend
+    ports:
+      - 8000:8000
+    command: uvicorn main:app --reload
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      - RABBITMQ=rabbitmq
+      - SQLALCHEMY_DATABASE_URI=postgresql+psycopg2://postgres:postgres@postgres/postgres
+    links:
+      - rabbitmq
+      - postgres
+    restart: on-failure
+    networks:
+      - mynetwork
+
+networks:
+  mynetwork:
