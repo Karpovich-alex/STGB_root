@@ -21,8 +21,8 @@ class Connector:
 
     def get_connection(self, host):
         self.max_count_tries = 5
-        cur_try = 0
-        logging.info('Trying to connect to AMQP')
+        cur_try = 1
+        logging.info(f'Trying to connect to AMQP on host: {host}')
         while True:
             try:
                 logging.info(f'Try #{cur_try}')
