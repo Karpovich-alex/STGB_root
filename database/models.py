@@ -7,9 +7,13 @@ from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, Tabl
 from sqlalchemy.orm import declarative_base, relationship
 
 import utils.validator as v
+################
+from STGB_backend.update_checker import Notify
 from .base import current_session as s
 
+################
 Base = declarative_base()
+notify = Notify()
 
 
 class Messengers(enum.Enum):
@@ -194,6 +198,7 @@ class Message(Base):
 
         s.add(m)
         s.commit()
+        notify.handle_insert(m, m.chat.get_users_ids())
         return m
 
     def __repr__(self):
@@ -307,7 +312,7 @@ class Chat(Base, MessengerConnector):
 
     def to_dict_last(self) -> Dict:
         ''' Return chat id and last message'''
-        return {'id': self.id, 'messages': [self.get_last_message().to_dict() or {}]}
+        return {'chat_id': self.id, 'messages': [self.get_last_message().to_dict() or {}]}
 
     def to_dict(self) -> Dict:
         ''' Return chat id and all messages'''
@@ -324,3 +329,6 @@ class Chat(Base, MessengerConnector):
         s.add(self)
         s.commit()
         return self
+
+    def get_users_ids(self):
+        return [u.id for u in self.users]
