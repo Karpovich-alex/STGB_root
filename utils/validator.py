@@ -11,9 +11,9 @@ class Source(Enum):
 
 
 class User(BaseModel):
-    username: str
+    username: Optional[str]
     id: int
-    first_name: str
+    first_name: Optional[str]
     full_name: Optional[str]
     language_code: Optional[str]
     is_bot: Optional[bool]

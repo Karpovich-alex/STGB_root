@@ -2,7 +2,8 @@ import logging
 import os
 import sys
 import time
-from typing import Union
+from json import dumps, loads
+from typing import Union, List
 
 import pika
 
@@ -45,12 +46,13 @@ class Connector:
 
 
 class Listener:
-    def __init__(self, queue):
+    def __init__(self, queue, consumer_tag):
         connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost'))
         self.channel = connection.channel()
         self.channel.queue_declare(queue=queue, durable=True)  # , durable=True
         self.channel.basic_qos(prefetch_count=1)
-        self.channel.basic_consume(queue=queue, on_message_callback=self._callback, consumer_tag='telegram_connector')
+        self.channel.basic_consume(queue=queue, on_message_callback=self._callback, consumer_tag=consumer_tag)
+        self._consumer_tag = consumer_tag
 
     def callback(self, body: bytes):
         raise NotImplemented
@@ -82,3 +84,25 @@ class Listener:
                 sys.exit(0)
             except SystemExit:
                 os._exit(0)
+
+    def stop(self):
+        self.channel.stop_consuming(self._consumer_tag)
+
+
+class Notify(Connector):
+    def __init__(self):
+        super(Notify, self).__init__('notify')
+
+    def handle_insert(self, message, users: List[int]):
+        # {'message': Message, 'users': List[users_id}
+        self.publish(dumps({'message': message.to_dict(), 'users': users}, default=str))
+
+
+class NotifyListener(Listener):
+    def __init__(self, checker: 'Checker', consumer_tag):
+        self.checker = checker
+        super(NotifyListener, self).__init__('notify', consumer_tag)
+
+    def callback(self, body: bytes):
+        data = loads(body)
+        self.checker.add_information(data.get('message', {}), data.get('users', []))

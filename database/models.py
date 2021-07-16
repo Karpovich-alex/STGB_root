@@ -8,7 +8,7 @@ from sqlalchemy.orm import declarative_base, relationship
 
 import utils.validator as v
 ################
-from STGB_backend.update_checker import Notify
+from utils.connector import Notify
 from .base import current_session as s
 
 ################
@@ -164,6 +164,15 @@ class User(Base, MessengerConnector):
         return users
 
 
+def on_message_add(f):
+    def dec(*args, **kwargs):
+        message: 'Message' = f(*args, **kwargs)
+        notify.handle_insert(message, message.chat.get_users_ids())
+        return message
+
+    return dec
+
+
 class Message(Base):
     __tablename__ = 'message'
     id = Column(Integer, primary_key=True)
@@ -178,6 +187,7 @@ class Message(Base):
     user = relationship('User', back_populates='messages')
 
     @classmethod
+    @on_message_add
     def add_message(cls, message: v.Message,
                     user: Optional['User'] = None,
                     chat: Optional['Chat'] = None,
@@ -193,12 +203,13 @@ class Message(Base):
             params['chat_id'] = chat_id
         if user_id:
             params['user_id'] = user_id
-
-        m = cls(messenger_id=message.id, text=message.text, time=message.date, **params)
+        if isinstance(message, telegram.Message):
+            m = cls(messenger_id=message.message_id, text=message.text, time=message.date, **params)
+        else:
+            m = cls(messenger_id=message.id, text=message.text, time=message.date, **params)
 
         s.add(m)
         s.commit()
-        notify.handle_insert(m, m.chat.get_users_ids())
         return m
 
     def __repr__(self):
@@ -305,7 +316,7 @@ class Chat(Base, MessengerConnector):
 
     def get_last_message(self) -> Optional['Message']:
         try:
-            m = self.messages[0]
+            m = self.messages[-1]
             return m
         except IndexError:
             return None
