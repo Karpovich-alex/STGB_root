@@ -12,29 +12,42 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 
 class Connector:
-    def __init__(self, queue, host='localhost', port=None, max_count_tries=5):
-
-        self.connection = self.get_connection(host)
-        self.channel = self.connection.channel()
+    def __init__(self, queue, host='localhost', port=5672, max_count_tries=5, *, lazy=False):
         self.queue = queue
-        self.channel.queue_declare(queue=queue, durable=True)
         self.max_count_tries = max_count_tries
 
-    def get_connection(self, host):
-        self.max_count_tries = 5
+        self.channel = None
+        self.connection = None
+        if not lazy:
+            self.connect(host, port)
+
+    def get_connection(self, host, port):
         cur_try = 1
-        logging.info(f'Trying to connect to AMQP on host: {host}')
+        logging.info(f'Trying to connect to AMQP on host: {host} port: {port}')
         while True:
             try:
                 logging.info(f'Try #{cur_try}')
-                return pika.BlockingConnection(pika.ConnectionParameters(host))
+                return pika.BlockingConnection(pika.ConnectionParameters(host, port))
             except pika.connection.exceptions.AMQPError as exc:
                 if self.max_count_tries == cur_try:
                     raise exc
                 cur_try += 1
                 time.sleep(2)
 
+    def connect(self, host, port):
+        self.connection = self.get_connection(host, port)
+        self.prepare_channel()
+
+    @property
+    def has_connection(self) -> bool:
+        return bool(self.channel) and bool(self.connection) and (self.connection.is_open or False)
+
+    def prepare_channel(self):
+        self.channel = self.connection.channel()
+        self.channel.queue_declare(queue=self.queue, durable=True)
+
     def publish(self, message: Union[str, bytes]):
+
         try:
             if isinstance(message, str):
                 self.channel.basic_publish(exchange='', routing_key=self.queue, body=message.encode())
@@ -45,9 +58,21 @@ class Connector:
             logging.exception(e)
 
 
+class LazyConnector(Connector):
+    def __init__(self, queue, host='localhost', port=5672):
+        self.host = host
+        self.port = port
+        super(LazyConnector, self).__init__(queue, lazy=True)
+
+    def publish(self, message: Union[str, bytes]):
+        if not self.has_connection:
+            self.connect(self.host, self.port)
+        super(LazyConnector, self).publish(message)
+
+
 class Listener:
-    def __init__(self, queue, consumer_tag):
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost'))
+    def __init__(self, queue, host='localhost', port=5672, consumer_tag='listener'):
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host=host, port=port))
         self.channel = connection.channel()
         self.channel.queue_declare(queue=queue, durable=True)  # , durable=True
         self.channel.basic_qos(prefetch_count=1)
@@ -90,12 +115,22 @@ class Listener:
 
 
 class Notify(Connector):
-    def __init__(self):
-        super(Notify, self).__init__('notify')
+    def __init__(self, host='localhost', port=5672, **kwargs):
+        super(Notify, self).__init__('notify', host=host, port=port, **kwargs)
 
     def handle_insert(self, message, users: List[int]):
         # {'message': Message, 'users': List[users_id}
         self.publish(dumps({'message': message.to_dict(), 'users': users}, default=str))
+
+
+class LazyNotify(LazyConnector):
+    def __init__(self, host='localhost', port=5672):
+        super(LazyNotify, self).__init__('notify', host=host, port=port)
+
+    def handle_insert(self, message, users: List[int]):
+        # self.publish(dumps({'message': message.to_dict(), 'users': users}, default=str))
+        self.publish(dumps('message'))
+        # print('handle')
 
 
 class NotifyListener(Listener):

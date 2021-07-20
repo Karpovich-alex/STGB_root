@@ -1,22 +1,23 @@
-from contextlib import contextmanager
-import typing
-from typing import Callable, Optional
 import logging
+import typing
+from contextlib import contextmanager
+from typing import Callable, Optional
 
+from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
-from sqlalchemy import create_engine
 
 from config import Config
 
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    level=logging.INFO)
+
+logging.info('CONNECTING TO {uri}'.format(uri=Config.SQLALCHEMY_DATABASE_URI))
 engine = create_engine(Config.SQLALCHEMY_DATABASE_URI, echo=False)
 Session = sessionmaker(bind=engine)
 current_session = scoped_session(Session)
 
 Base = declarative_base()
-
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    level=logging.INFO)
 
 
 @contextmanager
@@ -35,7 +36,8 @@ def session(**kwargs) -> typing.ContextManager[Session]:
 
 from threading import local
 
-#pylint: disable=too-few-public-methods
+
+# pylint: disable=too-few-public-methods
 class SessionRegistry(local):
     session = None
 
@@ -74,7 +76,8 @@ def session_thread(**kwargs):
     finally:
         mw.on_response()
 
-#pylint: disable=too-few-public-methods
+
+# pylint: disable=too-few-public-methods
 class Handler:
 
     @staticmethod

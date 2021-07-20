@@ -7,13 +7,10 @@ from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, Tabl
 from sqlalchemy.orm import declarative_base, relationship
 
 import utils.validator as v
-################
-from utils.connector import Notify
 from .base import current_session as s
+from .db_utils import on_message_add
 
-################
 Base = declarative_base()
-notify = Notify()
 
 
 class Messengers(enum.Enum):
@@ -52,6 +49,7 @@ class User(Base, MessengerConnector):
     messenger_id = Column(Integer)  # id in messenger
     messenger = Column(Enum(Messengers))  # откуда отправили сообщение
 
+    # TODO: Change this relation to many-to-many
     bot_id = Column(Integer, ForeignKey('bot.id'), nullable=False)
     bot = relationship('Bot', backref='users')
 
@@ -62,6 +60,8 @@ class User(Base, MessengerConnector):
     language_code = Column(String(2))
     chats = relationship('Chat', secondary='usersinchat', back_populates='users')
     messages = relationship('Message', back_populates='user')
+
+    password_hash = Column(String(60))
 
     def __init__(self, *args, **kwargs):
         super(Base, self).__init__(*args, **kwargs)
@@ -80,6 +80,7 @@ class User(Base, MessengerConnector):
     #         filter_args = {'messenger_id': user.id, 'bot_id': user.bot.id}
     #     u = s.query(User).filter_by(**filter_args).first()
     #     return bool(u)
+
     @classmethod
     def check_user(cls, user: v.User, **filter_args) -> Union['User', bool]:
         filter_args = parse_user(user, filter_args)
@@ -162,15 +163,6 @@ class User(Base, MessengerConnector):
     def get_support_users(cls, bot_id) -> Optional[List['User']]:
         users = s.query(cls).filter_by(bot_id=bot_id, messenger=Messengers.support).all()
         return users
-
-
-def on_message_add(f):
-    def dec(*args, **kwargs):
-        message: 'Message' = f(*args, **kwargs)
-        notify.handle_insert(message, message.chat.get_users_ids())
-        return message
-
-    return dec
 
 
 class Message(Base):
