@@ -14,6 +14,12 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 logging.info('CONNECTING TO {uri}'.format(uri=Config.SQLALCHEMY_DATABASE_URI))
 engine = create_engine(Config.SQLALCHEMY_DATABASE_URI, echo=False)
+
+# DATABASE_URL = "sqlite:///./test.db"
+# logging.info('CONNECTING TO {uri}'.format(uri=DATABASE_URL))
+# engine = create_engine(
+#     DATABASE_URL, connect_args={"check_same_thread": False}
+# )
 Session = sessionmaker(bind=engine)
 current_session = scoped_session(Session)
 

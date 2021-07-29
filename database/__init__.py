@@ -1,5 +1,5 @@
 from .base import current_session, engine, Middleware, Handler
-from .models import User, Message, Bot, Base, Chat, Messengers
+from .models import WebUser, Base, User, Message, Bot, Base, Chat
 
 
 def init_db():
