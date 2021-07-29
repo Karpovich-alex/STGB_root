@@ -136,7 +136,7 @@ class LazyNotify(LazyConnector):
 class NotifyListener(Listener):
     def __init__(self, checker: 'Checker', consumer_tag):
         self.checker = checker
-        super(NotifyListener, self).__init__('notify', consumer_tag)
+        super(NotifyListener, self).__init__('notify', consumer_tag=consumer_tag)
 
     def callback(self, body: bytes):
         data = loads(body)

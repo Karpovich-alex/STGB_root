@@ -5,6 +5,7 @@ import telegram
 from passlib.context import CryptContext
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, Table
 from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.sql import func
 
 import utils.validator as v
 from utils.validator import Messengers
@@ -32,7 +33,9 @@ class MessengerConnector:
     @classmethod
     def get_messenger_id(cls, unique_id):
         c = s.query(cls).filter_by(id=unique_id).first()
-        return c.messenger_id
+        if not c:
+            c = s.query(cls).filter_by(uid=unique_id).first()
+        return c.messenger_id or None
 
 
 UsersInChat = Table('usersinchat', Base.metadata,
@@ -61,8 +64,9 @@ class UserConnector(Base, MessengerConnector):
     __tablename__ = 'userconnector'
     id = Column(Integer, autoincrement=True, primary_key=True)
     relation = Column(Enum(v.Source))
-    chats = relationship('Chat', secondary='usersinchat', back_populates='userconnectors')
+    chats = relationship('Chat', secondary='usersinchat', back_populates='userconnectors', lazy='dynamic')
     messages = relationship('Message', back_populates='userconnector')
+    bots = relationship('Bot', secondary='usersbots', backref='userconnector')
 
     def __init__(self, relation):
         self.relation = relation
@@ -78,6 +82,12 @@ class UserConnector(Base, MessengerConnector):
             return s.query(User).filter_by(uid=self.id).first()
 
 
+UsersBots = Table('usersbots',
+                  Base.metadata,
+                  Column('user_id', Integer, ForeignKey('userconnector.id')),
+                  Column('bot_id', Integer, ForeignKey('bot.id')))
+
+
 class WebUser(Base):
     __tablename__ = 'webusers'
     uid = Column(Integer, ForeignKey('userconnector.id'), unique=True)
@@ -89,11 +99,29 @@ class WebUser(Base):
     connector = relationship("UserConnector",  # backref=backref("user", uselist=False),
                              primaryjoin=f"and_(UserConnector.id==WebUser.uid, UserConnector.relation=='{v.Source.system.name}')")
 
+    @property
+    def bots(self):
+        return self.connector.bots
+
+    @property
+    def chats(self):
+        return self.connector.chats.all()
+
+    def get_chat(self, bot_id):
+        return self.connector.chats.filter_by(bot_id=bot_id).all()
+
+    def get_chat_by_id(self, chat_id):
+        return self.connector.chats.filter_by(id=chat_id).first()
+
+    def is_allowed(self, **obj_id):
+        assert len(obj_id) == 1
+        obj_name, obj_id = obj_id.popitem()  # bot_id -> bot
+        obj_name = obj_name.split('_')[0]
+        if obj_name == 'chat':
+            return self.get_chat_by_id(obj_id)
+
     def __repr__(self):
         return "<WebUser uid: {uid} username: {username}>".format(uid=self.uid, username=self.username)
-
-    def verify_password(self, password):
-        return pwd_context.verify(password, self.hashed_password)
 
     def to_base(self):
         return v.WebUser.from_orm(self)
@@ -119,7 +147,10 @@ class WebUser(Base):
 
     @classmethod
     def check_user(cls, user, **filter_args) -> Optional['WebUser']:
-        filter_args['username'] = user.username
+        if 'username' in user.__dict__:
+            filter_args['username'] = user.username
+        if 'id' in user.__dict__ and user.id:
+            filter_args['uid'] = user.id
         u = s.query(cls).filter_by(**filter_args).first()
         return u
 
@@ -157,7 +188,7 @@ class User(Base, MessengerConnector):
 
     @property
     def chats(self):
-        return self.connector.chats
+        return self.connector.chats.all()
 
     def add_chat(self, chat):
         self.connector.chats.append(chat)
@@ -267,7 +298,7 @@ class Message(Base):
     id = Column(Integer, primary_key=True)
     messenger_id = Column(Integer)
     text = Column(String)
-    time = Column(DateTime)
+    time = Column(DateTime, server_default=func.now())
 
     chat_id = Column(Integer, ForeignKey('chat.id'), nullable=False)
     user_id = Column(Integer, ForeignKey('userconnector.id'), nullable=False)
@@ -281,7 +312,7 @@ class Message(Base):
 
     @classmethod
     @on_message_add
-    def add_message(cls, message: v.Message,
+    def add_message(cls, message: Union[v.Message, telegram.Message],
                     user: Optional['User'] = None,
                     chat: Optional['Chat'] = None,
                     user_id=None,
@@ -292,10 +323,10 @@ class Message(Base):
             params['user_id'] = user.uid
         if chat:
             params['chat'] = chat
-        # if chat_id:
-        #     params['chat_id'] = chat_id
-        # if user_id:
-        #     params['user_id'] = user_id
+        if chat_id:
+            params['chat_id'] = chat_id
+        if user_id:
+            params['user_id'] = user_id
         if isinstance(message, telegram.Message):
             m = cls(messenger_id=message.message_id, text=message.text, time=message.date, **params)
         else:
@@ -398,6 +429,9 @@ class Chat(Base, MessengerConnector):
         c = s.query(cls).filter_by(messenger_id=messenger_id, bot_id=bot_id).first()
         return c.id
 
+    def get_messages(self):
+        return self.me
+
     @classmethod
     def get_chat(cls, chat_id=None, messenger_id=None, messenger=None) -> Optional['Chat']:
         c = None
@@ -427,7 +461,6 @@ class Chat(Base, MessengerConnector):
     def __repr__(self):
         return "<Chat #{id}>".format(id=self.id)
 
-    #
     def get_all_messages(self) -> Optional[List['Message']]:
         return self.messages
 

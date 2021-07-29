@@ -32,7 +32,7 @@ class User(BaseUser):
 
 
 class WebUser(BaseUser):
-    full_name: str
+    full_name: Optional[str]
 
     @classmethod
     def from_orm(cls, user):  # user: 'm.WebUser'
