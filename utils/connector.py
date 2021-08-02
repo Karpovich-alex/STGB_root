@@ -1,11 +1,14 @@
 import logging
 import os
 import sys
+import threading
 import time
 from json import dumps, loads
-from typing import Union, List
+from typing import Union
 
 import pika
+
+from utils.schema import MultipleNotifyUpdates
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     level=logging.INFO)
@@ -18,8 +21,10 @@ class Connector:
 
         self.channel = None
         self.connection = None
+        self.connection_params = (host, port)
         if not lazy:
-            self.connect(host, port)
+            self.connect(*self.connection_params)
+        self._thread = None
 
     def get_connection(self, host, port):
         cur_try = 1
@@ -35,8 +40,16 @@ class Connector:
                 time.sleep(2)
 
     def connect(self, host, port):
+        self._thread = threading.Thread(target=self._connect, args=(host, port),
+                                        name=f"Connector AMQP to queue {self.queue}")
+        self._thread.start()
+
+    def _connect(self, host, port):
         self.connection = self.get_connection(host, port)
         self.prepare_channel()
+
+    def stop(self):
+        self._thread.join()
 
     @property
     def has_connection(self) -> bool:
@@ -46,15 +59,18 @@ class Connector:
         self.channel = self.connection.channel()
         self.channel.queue_declare(queue=self.queue, durable=True)
 
+    # TODO: add public method which convert data to bytes
     def publish(self, message: Union[str, bytes]):
-
         try:
             if isinstance(message, str):
                 self.channel.basic_publish(exchange='', routing_key=self.queue, body=message.encode())
             elif isinstance(message, bytes):
                 self.channel.basic_publish(exchange='', routing_key=self.queue, body=message)
+            else:
+                raise AttributeError
             return True
         except Exception as e:
+            self._connect(*self.connection_params)
             logging.exception(e)
 
 
@@ -98,7 +114,7 @@ class Listener:
             except SystemExit:
                 os._exit(0)
 
-    async def run(self):
+    def run(self):
         import asyncio
         loop = asyncio.get_event_loop()
         try:
@@ -118,19 +134,16 @@ class Notify(Connector):
     def __init__(self, host='localhost', port=5672, **kwargs):
         super(Notify, self).__init__('notify', host=host, port=port, **kwargs)
 
-    def handle_insert(self, message, users: List[int]):
-        # {'message': Message, 'users': List[users_id}
-        self.publish(dumps({'message': message.to_dict(), 'users': users}, default=str))
+    def handle_insert(self, update: MultipleNotifyUpdates):
+        self.publish(dumps(update.json()))
 
 
 class LazyNotify(LazyConnector):
     def __init__(self, host='localhost', port=5672):
         super(LazyNotify, self).__init__('notify', host=host, port=port)
 
-    def handle_insert(self, message, users: List[int]):
-        # self.publish(dumps({'message': message.to_dict(), 'users': users}, default=str))
-        self.publish(dumps('message'))
-        # print('handle')
+    def handle_insert(self, update: MultipleNotifyUpdates):
+        self.publish(dumps(update.json()))
 
 
 class NotifyListener(Listener):
@@ -140,4 +153,4 @@ class NotifyListener(Listener):
 
     def callback(self, body: bytes):
         data = loads(body)
-        self.checker.add_information(data.get('message', {}), data.get('users', []))
+        self.checker.add_information(MultipleNotifyUpdates(**data))
