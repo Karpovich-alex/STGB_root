@@ -3,7 +3,7 @@ from typing import Optional, List, Dict, Union
 
 import telegram
 from passlib.context import CryptContext
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, Table
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, Table, text
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 
@@ -42,11 +42,10 @@ UsersInChat = Table('usersinchat', Base.metadata,
                     Column('user_id', Integer, ForeignKey('userconnector.id')),
                     Column('chat_id', Integer, ForeignKey('chat.id')))
 
-
-# class UserInChat(Base):
-#     __tablename__ = 'usersinchat'
-#     user_id = Column(Integer, ForeignKey('userconnector.id'), primary_key=True),
-#     chat_id = Column(Integer, ForeignKey('chat.id'), primary_key=True)
+UsersBots = Table('usersbots',
+                  Base.metadata,
+                  Column('user_id', Integer, ForeignKey('webusers.uid')),
+                  Column('bot_id', Integer, ForeignKey('bot.id')))
 
 
 def parse_user(user: v.User, filter_args: Dict) -> Dict:
@@ -66,7 +65,6 @@ class UserConnector(Base, MessengerConnector):
     relation = Column(Enum(v.Source))
     chats = relationship('Chat', secondary='usersinchat', back_populates='userconnectors', lazy='dynamic')
     messages = relationship('Message', back_populates='userconnector')
-    bots = relationship('Bot', secondary='usersbots', backref='userconnector')
 
     def __init__(self, relation):
         self.relation = relation
@@ -82,36 +80,35 @@ class UserConnector(Base, MessengerConnector):
             return s.query(User).filter_by(uid=self.id).first()
 
 
-UsersBots = Table('usersbots',
-                  Base.metadata,
-                  Column('user_id', Integer, ForeignKey('userconnector.id')),
-                  Column('bot_id', Integer, ForeignKey('bot.id')))
-
-
 class WebUser(Base):
     __tablename__ = 'webusers'
     uid = Column(Integer, ForeignKey('userconnector.id'), unique=True)
     id = Column(Integer, autoincrement=True, primary_key=True)
-    username = Column(String(128), unique=True)
+    username = Column(String(128), unique=True, index=True)
     full_name = Column(String(128))
     hashed_password = Column(String(100))
 
+    bots = relationship('Bot', secondary='usersbots', backref='webuser', lazy='dynamic')
     connector = relationship("UserConnector",  # backref=backref("user", uselist=False),
-                             primaryjoin=f"and_(UserConnector.id==WebUser.uid, UserConnector.relation=='{v.Source.system.name}')")
-
-    @property
-    def bots(self):
-        return self.connector.bots
+                             primaryjoin="and_(UserConnector.id==WebUser.uid, "
+                                         f"UserConnector.relation=='{v.Source.system.name}')")
 
     @property
     def chats(self):
-        return self.connector.chats.all()
+        return self._chats.all()
+
+    @property
+    def _chats(self):
+        sq = s.query(UsersBots).where(text(f"usersbots.user_id={self.uid}")).subquery()
+        return s.query(Chat).join(sq, Chat.bot_id == sq.c.bot_id)
+        # return s.query(Chat).join(s.query(UsersBots).where(user_id=self.uid))
 
     def get_chat(self, bot_id):
-        return self.connector.chats.filter_by(bot_id=bot_id).all()
+        # return s.query(Chat).join(sq, Chat.bot_id == sq.c.bot_id).all()
+        return self._chats.filter_by(bot_id=bot_id).all()
 
     def get_chat_by_id(self, chat_id):
-        return self.connector.chats.filter_by(id=chat_id).first()
+        return self._chats.filter(Chat.id == chat_id).first()
 
     def is_allowed(self, **obj_id):
         assert len(obj_id) == 1
@@ -341,8 +338,11 @@ class Message(Base):
                                                                           chat_id=self.chat_id)
 
     def to_dict(self) -> Dict:
-        return {'text': self.text, 'time': self.time, 'chat_id': self.chat_id, 'user_id': self.user_id,
+        return {'id': self.id, 'text': self.text, 'time': self.time, 'chat_id': self.chat_id, 'user_id': self.user_id,
                 'username': self.user.username}
+
+    def get_bot_id(self) -> int:
+        return self.chat.bot_id
 
 
 class Bot(Base):
