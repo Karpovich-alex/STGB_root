@@ -110,12 +110,17 @@ class WebUser(Base):
     def get_chat_by_id(self, chat_id):
         return self._chats.filter(Chat.id == chat_id).first()
 
+    def get_bot_by_id(self, bot_id):
+        return self.bots.where(Bot.id == bot_id).first()
+
     def is_allowed(self, **obj_id):
         assert len(obj_id) == 1
         obj_name, obj_id = obj_id.popitem()  # bot_id -> bot
         obj_name = obj_name.split('_')[0]
         if obj_name == 'chat':
             return self.get_chat_by_id(obj_id)
+        if obj_name == 'bot':
+            return self.get_bot_by_id(obj_id)
 
     def __repr__(self):
         return "<WebUser uid: {uid} username: {username}>".format(uid=self.uid, username=self.username)
@@ -417,6 +422,10 @@ class Chat(Base, MessengerConnector):
     def users(self):
         return [uc.user for uc in self.userconnectors]
 
+    @property
+    def user(self):
+        return self.userconnectors[0].user
+
     @classmethod
     def create_chat(cls, user, bot_id, messenger_id):
         c = Chat(bot_id=bot_id, messenger_id=messenger_id)
@@ -443,6 +452,10 @@ class Chat(Base, MessengerConnector):
             c = s.query(cls).filter_by(id=chat_id).first()
         return c or False
 
+    @property
+    def last_message(self):
+        return self.get_last_message()
+
     def get_last_message(self) -> Optional['Message']:
         try:
             m = self.messages[-1]
@@ -452,7 +465,7 @@ class Chat(Base, MessengerConnector):
 
     def to_dict_last(self) -> Dict:
         ''' Return chat id and last message'''
-        return {'chat_id': self.id, 'messages': [self.get_last_message().to_dict() or {}]}
+        return {'chat_id': self.id, 'messages': [self.last_message.to_dict() or {}]}
 
     def to_dict(self) -> Dict:
         ''' Return chat id and all messages'''

@@ -27,8 +27,12 @@ class Message(BaseModel):
 
 
 class Chat(BaseModel):
-    chat_id: int
+    chat_id: int = Field(alias='id')
+    user: User
     messages: List[Message] = []
+
+    class Config:
+        orm_mode = True
 
     @classmethod
     def parse(cls, message: Dict):
