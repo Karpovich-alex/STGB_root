@@ -1,9 +1,10 @@
-import logging
+import uuid
 from typing import Optional, List, Dict, Union
 
 import telegram
 from passlib.context import CryptContext
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Enum, Table, text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 
@@ -88,7 +89,7 @@ class WebUser(Base):
     full_name = Column(String(128))
     hashed_password = Column(String(100))
 
-    bots = relationship('Bot', secondary='usersbots', backref='webuser', lazy='dynamic')
+    _bots = relationship('Bot', secondary='usersbots', backref='webuser', lazy='dynamic')
     connector = relationship("UserConnector",  # backref=backref("user", uselist=False),
                              primaryjoin="and_(UserConnector.id==WebUser.uid, "
                                          f"UserConnector.relation=='{v.Source.system.name}')")
@@ -98,10 +99,17 @@ class WebUser(Base):
         return self._chats.all()
 
     @property
+    def bots(self):
+        return self._bots.all()
+
+    @property
     def _chats(self):
         sq = s.query(UsersBots).where(text(f"usersbots.user_id={self.uid}")).subquery()
         return s.query(Chat).join(sq, Chat.bot_id == sq.c.bot_id)
         # return s.query(Chat).join(s.query(UsersBots).where(user_id=self.uid))
+
+    def get_bot(self, token):
+        return self._bots.filter_by(token=token).first()
 
     def get_chat(self, bot_id):
         # return s.query(Chat).join(sq, Chat.bot_id == sq.c.bot_id).all()
@@ -111,7 +119,7 @@ class WebUser(Base):
         return self._chats.filter(Chat.id == chat_id).first()
 
     def get_bot_by_id(self, bot_id):
-        return self.bots.where(Bot.id == bot_id).first()
+        return self._bots.where(Bot.id == bot_id).first()
 
     def is_allowed(self, **obj_id):
         assert len(obj_id) == 1
@@ -127,6 +135,11 @@ class WebUser(Base):
 
     def to_base(self):
         return v.WebUser.from_orm(self)
+
+    # TODO: Check double commit
+    def add_bot(self, bot: 'Bot'):
+        self._bots.append(bot)
+        s.commit()
 
     @classmethod
     def get_password_hash(cls, password):
@@ -353,9 +366,27 @@ class Message(Base):
 class Bot(Base):
     __tablename__ = 'bot'
     id = Column(Integer, primary_key=True, autoincrement=True)
-    messenger_id = Column(Integer)
+
     messenger = Column(Enum(Messengers), nullable=False)
+    messenger_id = Column(Integer)
+    messenger_name = Column(String(45))
+
+    nickname = Column(String(45))
+
+    token = Column(String(45))
+    api_token = Column(UUID(as_uuid=True), default=uuid.uuid4(), nullable=False)
+
     chats = relationship('Chat', back_populates='bot')
+
+    def __init__(self, **kwargs):
+        kwargs['api_token'] = self.__table__.c.api_token.default.arg
+        super(Bot, self).__init__(**kwargs)
+
+    def commit(self):
+        if not self.id:
+            s.add(self)
+            s.commit()
+            return self
 
     @classmethod
     def exist(cls, bot, messenger) -> bool:
@@ -371,18 +402,16 @@ class Bot(Base):
         return bot.id
 
     @classmethod
-    def init_bot(cls, bot: telegram.Bot) -> Optional['Bot']:
-        messenger = Messengers.telegram
-        if cls.exist(bot, messenger):
-            return s.query(cls).filter_by(messenger_id=bot.id, messenger=messenger).first()
-        try:
-            b = cls(messenger_id=bot.id, messenger=messenger)
-            s.add(b)
-            s.commit()
-            return b
-        except Exception as e:
-            logging.exception(e)
-            return None
+    def create(cls, messenger_id, token, messenger=Messengers.telegram):
+        b = cls(messenger_id, token, messenger=messenger)
+        s.add(b)
+        s.commit()
+        return b
+
+    @classmethod
+    def verify_api(cls, api_token):
+        b = cls.get(api_token=api_token)
+        return b
 
     #
     #     @classmethod

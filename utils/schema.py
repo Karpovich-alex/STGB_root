@@ -1,7 +1,10 @@
 import datetime
-from typing import List, Dict, Union
+from enum import Enum
+from typing import List, Dict, Union, Optional
 
 from pydantic import BaseModel, Field
+
+from utils import validator as v
 
 
 class User(BaseModel):
@@ -178,3 +181,38 @@ class MultipleNotifyUpdates(BaseUpdate):
             if updates.user_id == user_id:
                 return self.updates.pop(idx)
         raise ValueError(f'User with id: {user_id} is not in updates')
+
+
+class ExportBot(BaseModel):
+    id: str
+    nickname: str
+    messenger_name: Optional[str]
+
+    class Config:
+        orm_mode = True
+
+
+class ExportBots(BaseModel):
+    bots: List[ExportBot]
+
+    class Config:
+        orm_mode = True
+
+
+class CreateBotData(BaseModel):
+    token: str
+    nickname: str
+
+    @property
+    def messenger(self):
+        return v.Messengers.telegram
+
+
+class Status(Enum):
+    ok = 0
+    error = 1
+
+
+class WebResponse(BaseModel):
+    status: Status
+    description: Optional[str]
