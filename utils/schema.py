@@ -2,7 +2,7 @@ import datetime
 from enum import Enum
 from typing import List, Dict, Union, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, UUID4
 
 from utils import validator as v
 
@@ -22,11 +22,16 @@ class User(BaseModel):
 class Message(BaseModel):
     id: int
     text: str
-    time: datetime.datetime
+    time: datetime.datetime = Field(default=datetime.datetime.now())
     user: User
 
     class Config:
         orm_mode = True
+
+
+class WebMessage(Message):
+    id: Optional[int]
+    chat_id: int
 
 
 class Chat(BaseModel):
@@ -143,7 +148,7 @@ class MultipleNotifyUpdates(BaseUpdate):
 
     @classmethod
     def parse(cls, update: Update, users: List[int]) -> 'MultipleNotifyUpdates':
-        return cls(update=[NotifyUpdate(user_id=user_id, update=[update]) for user_id in users])
+        return cls(updates=[NotifyUpdate(user_id=user_id, updates=[update]) for user_id in users])
 
     def remove(self, user_id):
         for idx, update in enumerate(self.updates):
@@ -184,8 +189,8 @@ class MultipleNotifyUpdates(BaseUpdate):
 
 
 class ExportBot(BaseModel):
-    id: str
-    nickname: str
+    id: UUID4 = Field(alias='api_token')
+    nickname: Optional[str]
     messenger_name: Optional[str]
 
     class Config:
@@ -201,7 +206,7 @@ class ExportBots(BaseModel):
 
 class CreateBotData(BaseModel):
     token: str
-    nickname: str
+    nickname: Optional[str]
 
     @property
     def messenger(self):

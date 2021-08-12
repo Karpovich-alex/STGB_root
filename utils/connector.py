@@ -3,7 +3,7 @@ import os
 import sys
 import threading
 import time
-from json import dumps, loads
+from json import loads
 from typing import Union
 
 import pika
@@ -61,17 +61,19 @@ class Connector:
 
     # TODO: add public method which convert data to bytes
     def publish(self, message: Union[str, bytes]):
+        if not self.channel:
+            return
         try:
             if isinstance(message, str):
                 self.channel.basic_publish(exchange='', routing_key=self.queue, body=message.encode())
             elif isinstance(message, bytes):
                 self.channel.basic_publish(exchange='', routing_key=self.queue, body=message)
             else:
-                raise AttributeError
+                raise AttributeError('message: Union[str, bytes]')
             return True
-        except Exception as e:
+        except AttributeError as e:
             self._connect(*self.connection_params)
-            logging.exception(e)
+            self.publish(message)
 
 
 class LazyConnector(Connector):
@@ -135,7 +137,7 @@ class Notify(Connector):
         super(Notify, self).__init__('notify', host=host, port=port, **kwargs)
 
     def handle_insert(self, update: MultipleNotifyUpdates):
-        self.publish(dumps(update.json()))
+        self.publish(update.json())
 
 
 class LazyNotify(LazyConnector):
@@ -143,7 +145,7 @@ class LazyNotify(LazyConnector):
         super(LazyNotify, self).__init__('notify', host=host, port=port)
 
     def handle_insert(self, update: MultipleNotifyUpdates):
-        self.publish(dumps(update.json()))
+        self.publish(update.json(by_alias=True))
 
 
 class NotifyListener(Listener):
