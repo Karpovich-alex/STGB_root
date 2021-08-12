@@ -34,12 +34,10 @@ services:
       retries: 5
   api:
     build:
-      context: ./
       dockerfile: STGB_backend/Dockerfile
+      context: ./
     container_name: stgb_backend
-    command: bash
-    #    command: uvicorn main:app --host 0.0.0.0 --port 8000
-    #    command: python -m http.server 8000
+    command: uvicorn STGB_backend.main:app --host 0.0.0.0 --port 8000
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -57,9 +55,6 @@ services:
       - mynetwork
     ports:
       - 8000:8000
-#    ports:
-#      - target: 8000
-#        published: 8000
 
 #  bot:
 #    build:
